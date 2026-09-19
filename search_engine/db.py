@@ -1,26 +1,24 @@
-import sqlite3
-from .config import DB_PATH
+import json
+import re
+from pathlib import Path
 
-def connect():
-    db = sqlite3.connect(DB_PATH)
-    db.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS documents USING fts5(
-        url UNINDEXED,
-        title,
-        text,
-        tokenize='unicode61'
-    )""")
-    return db
+INDEX=Path(__file__).with_name("search_index.json")
 
-def add_document(db, url, title, text):
-    db.execute("INSERT INTO documents(url,title,text) VALUES(?,?,?)",
-               (url, title, text))
-
-def search(query, limit=20):
-    db = connect()
-    rows = db.execute(
-        "SELECT url,title,snippet(documents,2,'<mark>','</mark>','…',20) "
-        "FROM documents WHERE documents MATCH ? LIMIT ?",
-        (query, limit)
-    ).fetchall()
-    db.close()
-    return [{"url":u,"title":t or u,"snippet":s} for u,t,s in rows]
+def search(query,limit=20):
+    if not INDEX.exists():
+        return []
+    docs=json.loads(INDEX.read_text(encoding="utf-8"))
+    terms=[x.lower() for x in re.findall(r"\w+",query,flags=re.UNICODE) if len(x)>1]
+    if not terms:
+        return []
+    scored=[]
+    for d in docs:
+        hay=(d.get("title","")+" "+d.get("text","")).lower()
+        score=sum(hay.count(t) for t in terms)
+        if score:
+            pos=min((hay.find(t) for t in terms if hay.find(t)>=0),default=0)
+            source=d.get("text","")
+            snippet=source[max(0,pos-120):pos+400].replace("\n"," ")
+            scored.append((score,d.get("url",""),d.get("title",""),snippet))
+    scored.sort(reverse=True,key=lambda x:x[0])
+    return [{"url":u,"title":t or u,"snippet":s} for _,u,t,s in scored[:limit]]
