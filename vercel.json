@@ -1,0 +1,8 @@
+{
+  "buildCommand": "python -m search_engine.download_wet --limit 1 && python -m search_engine.index_wet",
+  "functions": {
+    "search_engine/api.py": {
+      "maxDuration": 60
+    }
+  }
+}
