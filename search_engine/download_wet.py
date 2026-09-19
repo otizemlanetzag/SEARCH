@@ -1,45 +1,46 @@
 import argparse
 import gzip
 import io
-import json
 import urllib.request
 from .config import COMMON_CRAWL_INDEX, WET_LIMIT
 
 BASE = "https://data.commoncrawl.org/"
 
-def get_wet_paths(index_name):
-    url=f"https://index.commoncrawl.org/{index_name}-index?url=*&output=json&filter=status:200"
+def get_wet_paths(crawl):
+    # Common Crawl publishes a gzip-compressed manifest containing the
+    # WET segment paths for each crawl.
+    url = f"{BASE}crawl-data/{crawl}/wet.paths.gz"
     with urllib.request.urlopen(url, timeout=60) as r:
-        for line in r:
-            try:
-                obj=json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            path=obj.get("filename")
-            offset=int(obj.get("offset",0))
-            length=int(obj.get("length",0))
-            if path:
-                yield path,offset,length
+        manifest = gzip.decompress(r.read()).decode("utf-8", "replace")
+    for line in manifest.splitlines():
+        path = line.strip()
+        if path:
+            yield path
 
-def download_record(path, offset, length):
-    req=urllib.request.Request(
-        BASE+path,
-        headers={"Range":f"bytes={offset}-{offset+length-1}"}
+def download_wet(path):
+    req = urllib.request.Request(
+        BASE + path,
+        headers={"User-Agent": "SEARCH/1.0 (Common Crawl WET indexer)"}
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return gzip.GzipFile(fileobj=io.BytesIO(r.read())).read()
+    with urllib.request.urlopen(req, timeout=300) as r:
+        return r.read()
 
 def main():
-    p=argparse.ArgumentParser()
-    p.add_argument("--limit",type=int,default=WET_LIMIT)
-    p.add_argument("--out",default="wet-data")
-    args=p.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--limit", type=int, default=WET_LIMIT)
+    p.add_argument("--out", default="wet-data")
+    args = p.parse_args()
+
     import os
-    os.makedirs(args.out,exist_ok=True)
-    for i,(path,offset,length) in enumerate(get_wet_paths(COMMON_CRAWL_INDEX)):
-        if i>=args.limit: break
-        data=download_record(path,offset,length)
-        with open(f"{args.out}/{i:05d}.wet","wb") as f: f.write(data)
-        print(f"downloaded {i+1}: {path}")
-if __name__=="__main__":
+    os.makedirs(args.out, exist_ok=True)
+
+    for i, path in enumerate(get_wet_paths(COMMON_CRAWL_INDEX)):
+        if i >= args.limit:
+            break
+        data = download_wet(path)
+        with open(f"{args.out}/{i:05d}.wet.gz", "wb") as f:
+            f.write(data)
+        print(f"downloaded {i + 1}: {path}")
+
+if __name__ == "__main__":
     main()
